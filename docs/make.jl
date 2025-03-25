@@ -57,8 +57,7 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/octionary/BurgersJoint.jl",
+    repo = "github.com/octionary/BurgersJoint.jl.git",
     devbranch = "main",
-    target = "build",
-    push_preview = true
+    deploy_config = Documenter.GitHubActions()
 )
