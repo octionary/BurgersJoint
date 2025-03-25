@@ -55,3 +55,9 @@ makedocs(
     checkdocs = :none,
     clean = true
 )
+
+deploydocs(
+    repo = "github.com/octionary/BurgersJoint.jl.git",
+    devbranch = "main",
+    deploy_config = Documenter.GitHubActions()
+)
