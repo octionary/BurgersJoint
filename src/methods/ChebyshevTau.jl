@@ -2,7 +2,7 @@ module ChebyshevTau
 
 using LinearAlgebra
 using ProgressMeter
-using ..BurgersEquation: burgers_ic, viscosity
+using ..BurgersEquation: burgers_ic, viscosity, setup_time_grid
 
 export solveChebyshevTau
 
@@ -47,12 +47,12 @@ function linear_operator(N, nu)
 end
 
 # Helper function to compute the nonlinear term
-function nonlinear_term!(N_coeffs,a, V, D)
+function nonlinear_term!(NL_coeffs, a, V, D)
     u = V * a # Compute u from the spectral coefficients a
     du_dx = D * u # Compute du/dx from u
-    f = u .* du_dx # Viscous term 
-    N_coeffs .= V \ f # Transform back to spectral coefficients
-    return N_coeffs
+    f = u .* du_dx # Advective term
+    NL_coeffs .= V \ f # Transform back to spectral coefficients
+    return NL_coeffs 
 end
 
 """
@@ -60,25 +60,27 @@ end
 
 Solves the 1D Burgers equation on t in [0, T], x in [-1, 1] using the Chebyshev-Tau spectral method 
 with the ABCN scheme: Adams-Bashforth for the advective term and Crank-Nicholson for the viscous term,
-as described in Basdevant et al. (1986). Chebyshev-Gauss-Lobatto collocation spatial grid is used.
+as described in Basdevant et al. (1986). As Basdevant1986 omits many details, I have also consulted the
+notes on spectral methods by Prof. Herman Clerx. Chebyshev-Gauss-Lobatto collocation points are used 
+for the spatial grid.
 
 Arguments:
-- N: Number of grid points (also number of Chebyshev modes).
+- N: Number of grid points - 1 (I don't like this notation, but it's common in the literature).
 
 Keyword arguments:
 - dt: Time step.
 - T: Duration to solve over.
-- dt_snapshot: Time step for storing snapshots (default = T, only initial and final).
+- dt_snapshot: Time step for storing snapshots (default = -1, only initial state).
 - nu: Kinematic viscosity (defaults to BurgersEquation.viscosity()).
 - ic: Initial condition (defaults to BurgersEquation.burgers_ic()).
 
 Output:
 - x: Real-space grid of length N.
 - u_final: Final solution in real space (length N).
-- times: Vector of time steps.
-- history: Vector of solution snapshots at times t = n/pi, n=0,1,2,...
+- snapshot_times: Vector of time steps at which the solution was saved.
+- snapshots: Vector of solution snapshots at times t = {n*dt_snapshot}, n=0,1,2,...
 """
-function solveChebyshevTau(N; dt = 1e-3, T = 1.0, dt_snapshot = T, nu = viscosity(), ic = burgers_ic)
+function solveChebyshevTau(N; dt = 1e-3, T = 1.0, dt_snapshot = -1, nu = viscosity(), ic = burgers_ic)
     # Generate Chebyshev-Gauss-Lobatto collocation points: x_j = cos(pi * j / N), j=0,1,...,N
     x = cos.(pi * (0:N) / N) 
 
@@ -87,10 +89,10 @@ function solveChebyshevTau(N; dt = 1e-3, T = 1.0, dt_snapshot = T, nu = viscosit
     V = cos.((0:N)' .* acos.(x)) # Vandermonde matrix for Chebyshev polynomials, so that u = V * a
     a = V \ u # Solve for coefficients a
 
-    # Set up time-stepping
-    times = collect(0.0:dt:T)
-    history = Vector{Vector{Float64}}() # store snapshots of the solution
-    push!(history, copy(u)) # store initial condition
+    # Setup time integration and snapshots
+    times, to_snapshot, snapshot_time_steps, snapshot_times = setup_time_grid(dt, T, dt_snapshot)
+    snapshots = Vector{Vector{Float64}}()
+    push!(snapshots, copy(u))  # Store initial condition as first snapshot
 
     # Define weight factors: c_0 = 2, c_n = 1 for n>= 1
     c = ones(N+1) # + 1 for the zeroth term
@@ -107,13 +109,15 @@ function solveChebyshevTau(N; dt = 1e-3, T = 1.0, dt_snapshot = T, nu = viscosit
     nonlinear_term!(N_curr, a, V, D)
     N_prev = copy(N_curr) # bootstrap the first step
 
-    # Construct total matrix for the implicit part of the time-stepping: A = c / dt * I - Lmat / 2
-    # Note to self: Remember to explain this form in the notebook
+    # Construct total matrix for the implicit part of the time-stepping:
+    # A = c / dt * I - Lmat / 2 
+    c_over_dt = c[1:N-1] ./ dt
     A = zeros(N+1, N+1)
-    A[1:N-1, 1:N-1] = Diagonal(c[1:N-1] ./ dt)
+    A[1:N-1, 1:N-1] = Diagonal(c_over_dt)
     A[1:N-1, 1:N+1] -= 0.5 * Lmat
 
     # Use two last rows to enforce BCs
+    # A' = A with extra rows for BCs
     A[N, :] .= 1 # Enforce sum(a) = 0
     for m in 0:N
         # Enforce sum((-1)^n * a_n) = 0
@@ -123,50 +127,51 @@ function solveChebyshevTau(N; dt = 1e-3, T = 1.0, dt_snapshot = T, nu = viscosit
     # Factorize A (speeds up solving the linear system)
     A_fact = factorize(A)
 
+    # Construct matrix B for the implicit part of the time-stepping: B = c / dt * I + Lmat / 2
+    B = zeros(N-1, N+1)
+    B[1:N-1, 1:N-1] = Diagonal(c_over_dt)
+    B[1:N-1, 1:N+1] += 0.5 * Lmat
+
     # Time-stepping loop
     t_step_last_stored = 0 # Last time step at which a snapshot was stored
     N_AB = similar(N_curr) # Adams-Bashforth term
-    L = zeros(N-1) # Linear term
-    c_over_dt = c[1:N-1] ./ dt
+
+    Ba = zeros(N-1)
+
     b = zeros(N+1) # RHS of the linear system
-    p = Progress(length(times)-1, dt=0.5, desc="Solving: ", barglyphs=BarGlyphs("[=> ]")) # Progress bar
-    @inbounds for t_step in 2:length(times)
+    p = Progress(length(times), dt=0.5, desc="Solving: ", barglyphs=BarGlyphs("[=> ]")) # Progress bar
+    @inbounds for t_step in eachindex(times)
         N_AB .= 1.5 * N_curr - 0.5 * N_prev # Compute the Adams-Bashforth term: 3/2 * N_curr - 1/2 * N_prev
 
-        mul!(L, Lmat, a) # Compute the linear term L = Lmat * a
+        # Construct b = A*a = B*a - N_AB 
+        mul!(Ba, B, a) # Ba: N-1, Lmat: N-1 x N+1, a: N+1
+        b[1:N-1] .= Ba - N_AB[1:N-1] # b = B*a - N_AB
 
-        # Construct the RHS of the linear system
-        for i in 1:N-1
-            b[i] = c_over_dt[i] * a[i] + 0.5 * L[i] - N_AB[i]
-            # Loop should be faster than vectorized here, avoiding temporary arrays
-        end
-        b[N:N+1] .= 0 # Enforce BCs
+        # Pad b with extra zeros for BCs: b' = [b,0,0]
+        b[N:N+1] .= 0 
 
-        # Solve the linear system
+        # Solve the linear system b = A*a for a
         a .= A_fact \ b
 
         # Compute the nonlinear term
         N_prev .= N_curr
         nonlinear_term!(N_curr, a, V, D)
 
-        # If time is a multiple of 1/pi, store the solution
-        mod_time = abs(mod(times[t_step], 1/pi))
-        if (mod_time < dt/2) && (t_step > t_step_last_stored)
-            t_step_last_stored = t_step
-            u .= V * a
-            push!(history, copy(u))
+        # Store solution snapshot if on a snapshot time step
+        if to_snapshot 
+            if t_step in snapshot_time_steps
+                u .= V * a # Compute u from the spectral coefficients a
+                push!(snapshots, copy(u)) # Store the snapshot
+            end
         end
 
         next!(p) # Update the progress bar
     end
 
-    # Get final solution
-    if t_step_last_stored < length(times)
-        u .= V * a
-        push!(history, copy(u))
-    end
+    # Get final solution from Chebyshev coefficients
+    u .= V * a
 
-    return x, u, times, history
+    return x, u, snapshot_times, snapshots
 end # function solveChebyshevTau
 
 

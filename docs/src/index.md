@@ -1,17 +1,22 @@
 # BurgersJoint Documentation
 
-Welcome to the documentation for BurgersJoint. This project provides various methods to solve Burgers' equation as formulated in
-    Basdevant et al. (1986), "Spectral and Finite Difference Solutions of the Burgers Equation"
-    (Basdevant1986).
+Welcome to the documentation for BurgersJoint. This project provides various methods to solve the 1D Burgers equation:
+```math
+\frac{\partial u}{\partial t} + u \frac{\partial u}{\partial x} = \nu \frac{\partial^2 u}{\partial x^2}
+```
+where \( u(t, x) \) is the velocity field, \( \nu \) is the viscosity, and \( t \) and \( x \) are time and space variables, respectively. The domain is defined as \( t \in [0, T] \) and \( x \in [-1, 1] \) with initial conditions \( u(0, x) = -\sin(\pi x) \) and periodic boundary conditions.
 
 ## Overview
 
-BurgersJoint is a Julia-based project that compares Fourier Galerkin, Fourier pseudospectral, Chebyshev Tau, finite difference, and PINN methods for solving Burgers’ equation.
+BurgersJoint is a Julia-based project that compares Fourier Galerkin, Fourier pseudospectral, Chebyshev Tau, finite difference, and neural network methods for solving Burgers’ equation.
 
 ## Modules
 
 - `BurgersEquation`: Defines the PDE, initial conditions, and analytical solutions.
 - `FourierSpectral`: Implements the Fourier Galerkin solver.
+- `ChebyshevTau`: Implements the Chebyshev Tau solver.
+- `FiniteDifference`: Implements the finite difference solver.
+- `NeuralNetwork`: Implements the Physics-Informed Neural Network (PINN) solver.
 
 ## Examples
 

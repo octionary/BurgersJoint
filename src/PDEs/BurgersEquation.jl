@@ -5,7 +5,7 @@ module BurgersEquation
 
 using FastGaussQuadrature: gausshermite
 
-export burgers_ic, viscosity, analytical_solution, analytical_slope
+export burgers_ic, viscosity, analytical_solution, analytical_slope, setup_time_grid
 
 """
     burgers_ic(x)
@@ -15,7 +15,7 @@ Default initial condition for Burgers’ equation, matching the setup in Basdeva
     ``u(x, 0) = -\\sin(\\pi x)``.
 """
 function burgers_ic(x)
-    return -sin(pi * x)
+    return -sinpi.(x)
 end
 
 """
@@ -25,7 +25,7 @@ Returns the kinematic viscosity used in Basdevant1986: ``\\nu = 1/(100\\pi)``.
 """
 function viscosity()
     #return 1e-2 / pi
-    return 0.003183098861837907 # 1/(100pi) to 16 digits
+    return 0.003183098861837907 # Precomputed 1e-2 / pi to 16 digits
 end
 
 """
@@ -60,7 +60,11 @@ Here, ``f(y) = \\exp(-\\cos(\\pi y)/(2\\pi\\nu))``. A change of variables ``\\et
 
 Hermite quadrature (with ``n`` nodes, default ``n = 50``) is used to evaluate these integrals.
 """
-function analytical_solution(x, t; nu=viscosity(), n=50)
+function analytical_solution(x, t; nu=viscosity(), n=50, ic=burgers_ic)
+    if t == 0
+        # Return the initial condition if t=0
+        return ic(x)
+    end
     nodes, weights = gausshermite(n)
     S = sqrt(4 * nu * t)
 
@@ -88,6 +92,21 @@ function analytical_slope(x, t; nu=viscosity(), n=50)
     dx = x2[2] - x2[1]
     # Only return the slope at the original x points
     return (u[3:2:end] - u[1:2:end-2]) / (2 * dx)
+end
+
+# Function for getting time grid and snapshot times, etc.
+# It should ideally be in a module for general solver methods, but it's here for now
+function setup_time_grid(dt, T, dt_snapshot = -1)
+    times = collect(0.0:dt:T) # evenly spaced time steps
+    to_snapshot = dt_snapshot > 0 # Flag for storing snapshots
+    snapshot_time_steps = [] # Initialize empty list for snapshot time steps
+    snapshot_times = []
+    if to_snapshot
+        # Generate list of time steps to store snapshots
+        snapshot_time_steps = [round(t/dt) for t in 0:dt_snapshot:T]
+        snapshot_times = [dt*i for i in snapshot_time_steps]
+    end
+    return times, to_snapshot, snapshot_time_steps, snapshot_times
 end
 
 end # module BurgersEquation

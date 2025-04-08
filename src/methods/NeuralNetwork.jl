@@ -35,7 +35,7 @@ function trainNeuralNetwork(N::Int; dt=1e-2, T=1.0, nu=viscosity(), ic=burgers_i
         u(0, x) ~ ic(x), # Initial condition
         u(t, -1) ~ 0.0, # Left Dirichlet
         u(t, 1)  ~ 0.0, # Right Dirichlet
-        u(t, -1) ~ u(t, 1) # Ensure periodic (should not be strictly necessary, but helps convergence)
+        #u(t, -1) ~ u(t, 1) # Ensure periodic (should not be strictly necessary, but helps convergence)
     ]
     # Note: Again, very clear definition of system - love it!
 
@@ -47,11 +47,12 @@ function trainNeuralNetwork(N::Int; dt=1e-2, T=1.0, nu=viscosity(), ic=burgers_i
 
     # Define neural network architecture
     chain = Chain(
-        Dense(2, 16, σ),
-        Dense(16, 16, σ),
-        Dense(16, 1)
+        Dense(2, 20, σ),
+        Dense(20, 20, σ),
+        Dense(20, 20, σ),
+        Dense(20, 1)
     )
-    # Note: I initially wanted to use a Kolmogorov-Arnold network and compare to MLP.
+    # Note: I initially wanted to use a Kolmogorov-Arnold network and compare to MLP (what is used now).
     #       I think this should be possible by using KDense in the KolmogorovArnold.jl package.
     #       I didn't have time to play with it, however.
 
@@ -160,7 +161,7 @@ Output:
 - snapshot_times: Vector of time steps at which the solution was evaluated.
 - history: Vector of solution snapshots at times t = n/pi, n=0,1,2,...
 """
-function solveNeuralNetwork(N::Int; dt=1e-2, T=1.0, nu=viscosity(), ic=burgers_ic)
+function solveNeuralNetwork(N::Int; dt=1e-2, T=1.0, dt_snapshot, nu=viscosity(), ic=burgers_ic)
     # If not trained, train it now
     if trainedModel === nothing
         @info "No trained model found. Training now."
@@ -176,16 +177,16 @@ function solveNeuralNetwork(N::Int; dt=1e-2, T=1.0, nu=viscosity(), ic=burgers_i
     x = range(-1, 1, length=N) # Spatial grid of length N
 
     # Generate list of times to evaluate the model at
-    snapshot_times = 0:1/pi:T
+    snapshot_times = 0:dt_snapshot:T
     if snapshot_times[end] < T
         snapshot_times = vcat(snapshot_times, T)
     end
 
     # Evaluate the model at each time and store the results
-    u_history = [ [ first(phi([t, xx], res.u)) for xx in x ] for t in snapshot_times ]
-    u_final = u_history[end]
+    snapshots = [ [ first(phi([t, xx], res.u)) for xx in x ] for t in snapshot_times ]
+    u_final = snapshots[end]
 
-    return x, u_final, snapshot_times, u_history
+    return x, u_final, snapshot_times, snapshots
 end
 
 end  # module NeuralNetwork
