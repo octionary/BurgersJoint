@@ -10,7 +10,7 @@ export burgers_ic, viscosity, analytical_solution, analytical_slope
 """
     burgers_ic(x)
 
-Initial condition for Burgers’ equation, matching the setup in Basdevant1986:
+Default initial condition for Burgers’ equation, matching the setup in Basdevant1986:
 
     ``u(x, 0) = -\\sin(\\pi x)``.
 """
